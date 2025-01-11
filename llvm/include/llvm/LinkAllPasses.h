@@ -100,7 +100,6 @@ namespace {
       (void) llvm::createLowerGlobalDtorsLegacyPass();
       (void) llvm::createLowerInvokePass();
       (void) llvm::createLowerSwitchPass();
-      (void) llvm::createLowerTapirToTargetPass();
       (void) llvm::createNaryReassociatePass();
       (void) llvm::createObjCARCContractPass();
       (void) llvm::createPromoteMemoryToRegisterPass();
