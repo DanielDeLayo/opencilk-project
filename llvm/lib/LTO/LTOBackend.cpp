@@ -236,12 +236,13 @@ static bool hasTapirTarget(const Config &Conf) {
          (Conf.TapirTarget != TapirTargetID::None);
 }
 
-enum class CilktoolID { Cilkscale, CilkscaleInstructions, Unknown };
+enum class CilktoolID { Cilkscale, CilkscaleInstructions, Cilkiaf, Unknown };
 
 static CilktoolID parseCilktool(StringRef ToolName) {
   return llvm::StringSwitch<CilktoolID>(ToolName)
       .Case("cilkscale", CilktoolID::Cilkscale)
       .Case("cilkscale-instructions", CilktoolID::CilkscaleInstructions)
+      .Case("cilkiaf", CilktoolID::Cilkiaf)
       .Default(CilktoolID::Unknown);
 }
 
@@ -258,6 +259,24 @@ static CSIOptions getCSIOptionsForCilkscale(bool InstrumentBasicBlocks) {
   Options.InstrumentAllocFns = false;
   return Options;
 }
+
+static CSIOptions getCSIOptionsForCilkiaf() {
+  CSIOptions Options;
+  // Disable CSI hooks that Cilkscale doesn't need.
+  Options.InstrumentFuncEntryExit = false;
+  Options.InstrumentBasicBlocks = false;
+  Options.InstrumentLoops = false;
+  Options.InstrumentCalls = false;
+  Options.InstrumentAtomics = false;
+  Options.InstrumentMemIntrinsics = false;
+  Options.InstrumentTapir = false;
+  Options.InstrumentAllocas = false;
+  Options.InstrumentAllocFns = false;
+  Options.CallsMayThrow = false;
+  Options.CallsTerminateBlocks = false;
+  return Options;
+}
+
 
 static void runNewPMPasses(const Config &Conf, Module &Mod, TargetMachine *TM,
                            unsigned OptLevel, bool IsThinLTO,
@@ -371,6 +390,16 @@ static void runNewPMPasses(const Config &Conf, Module &Mod, TargetMachine *TM,
           MPM.addPass(CSISetupPass(getCSIOptionsForCilkscale(true)));
           MPM.addPass(ComprehensiveStaticInstrumentationPass(
               getCSIOptionsForCilkscale(true)));
+          MPM.addPass(PB.buildPostCilkInstrumentationPipeline(Level));
+        });
+    break;
+  }
+  case CilktoolID::Cilkiaf: {
+    PB.registerTapirLoopEndEPCallback(
+        [&PB](ModulePassManager &MPM, OptimizationLevel Level) {
+          MPM.addPass(CSISetupPass(getCSIOptionsForCilkiaf()));
+          MPM.addPass(ComprehensiveStaticInstrumentationPass(
+              getCSIOptionsForCilkiaf()));
           MPM.addPass(PB.buildPostCilkInstrumentationPipeline(Level));
         });
     break;
