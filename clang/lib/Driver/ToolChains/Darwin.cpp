@@ -579,7 +579,7 @@ static void renderTapirLoweringOptions(const ArgList &Args,
 
   if (const Arg *A = Args.getLastArg(options::OPT_fcilktool_EQ))
     CmdArgs.push_back(
-        Args.MakeArgString(Twine("--plugin-opt=cilktool=") + A->getValue()));
+        Args.MakeArgString(Twine("--cilktool=") + A->getValue()));
 }
 
 static void AppendPlatformPrefix(SmallString<128> &Path, const llvm::Triple &T);
@@ -3633,9 +3633,8 @@ void DarwinClang::AddOpenCilkABIBitcode(const ArgList &Args,
     if (!getVFS().exists(P))
       getDriver().Diag(diag::err_drv_opencilk_missing_abi_bitcode)
           << A->getAsString(Args);
-    if (IsLTO)
-      CmdArgs.push_back(
-          Args.MakeArgString("--opencilk-abi-bitcode=" + P));
+    CmdArgs.push_back(Args.MakeArgString("--opencilk-abi-bitcode=" + P));
+    return;
   }
 
   bool UseAsan = getSanitizerArgs(Args).needsAsanRt();

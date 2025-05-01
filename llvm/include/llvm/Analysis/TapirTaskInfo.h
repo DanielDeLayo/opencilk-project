@@ -695,7 +695,7 @@ public:
     return Continuation;
   }
 
-  /// Get the spindle for the exceptional continuation o fthis task.  Returns
+  /// Get the spindle for the exceptional continuation of this task.  Returns
   /// nullptr if this task is a root task or the detach for this task does not
   /// have an unwind destination.
   Spindle *getEHContinuationSpindle() const {
@@ -708,7 +708,7 @@ public:
     return EHContinuation;
   }
 
-  /// Get the spindle for the exceptional continuation o fthis task.  Returns
+  /// Get the landingpad for the exceptional continuation of this task.  Returns
   /// nullptr if this task is a root task or the detach for this task does not
   /// have an unwind destination.
   Value *getLPadValueInEHContinuationSpindle() const {
@@ -735,7 +735,7 @@ public:
   /// Return true if basic block B is in a shared EH spindle dominated by this
   /// task.
   bool containsSharedEH(const BasicBlock *B) const {
-    for (const Spindle *S : SharedSubTaskEH)
+    for (const Spindle *S : DenseEHSpindleSet)
       if (S->contains(B))
         return true;
     return false;
@@ -826,36 +826,27 @@ public:
 
   /// Returns true if this task tracks any shared EH spindles for its subtasks.
   bool tracksSharedEHSpindles() const {
-    return !SharedSubTaskEH.empty();
+    return !DenseEHSpindleSet.empty();
   }
   /// Get the number of shared EH spindles in this task in constant time.
   unsigned getNumSharedEHSpindles() const {
-    return SharedSubTaskEH.size();
+    return DenseEHSpindleSet.size();
   }
 
   /// Return the shared EH spindles contained within this task.
-  const SmallVectorImpl<Spindle *> &getSharedEHSpindles() const {
-    return SharedSubTaskEH;
-  }
-  SmallVectorImpl<Spindle *> &getSharedEHSpindles() {
-    return SharedSubTaskEH;
+  const SmallPtrSetImpl<const Spindle *> &getSharedEHSpindles() const {
+    return DenseEHSpindleSet;
   }
   /// Get the shared EH spindle containing basic block B, if it exists.
   const Spindle *getSharedEHContaining(const BasicBlock *B) const {
-    for (const Spindle *S : SharedSubTaskEH)
-      if (S->contains(B))
-        return S;
-    return nullptr;
-  }
-  Spindle *getSharedEHContaining(BasicBlock *B) const {
-    for (Spindle *S : SharedSubTaskEH)
+    for (const Spindle *S : DenseEHSpindleSet)
       if (S->contains(B))
         return S;
     return nullptr;
   }
 
   using shared_eh_spindle_iterator =
-    typename SmallVectorImpl<Spindle *>::const_iterator;
+    typename SmallPtrSetImpl<const Spindle *>::const_iterator;
   shared_eh_spindle_iterator shared_eh_spindle_begin() const {
     return getSharedEHSpindles().begin();
   }
@@ -956,9 +947,14 @@ public:
   }
 
   /// Raw method to add a shared exception-handling spindle S to this task.
+  void markEHSpindle(Spindle &S) {
+    DenseEHSpindleSet.insert(&S);
+  }
+
+  /// Raw method to add a shared exception-handling spindle S to this task.
   void addEHSpindle(Spindle &S) {
     SharedSubTaskEH.push_back(&S);
-    DenseEHSpindleSet.insert(&S);
+    markEHSpindle(S);
   }
 
   // Add task ST as a subtask of this task.

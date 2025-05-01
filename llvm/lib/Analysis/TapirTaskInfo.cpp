@@ -187,6 +187,31 @@ static bool isTaskFrameResume(const Instruction *I,
 // Spindle implementation
 //
 
+static const BasicBlock *
+getSingleNotUnreachableSuccessor(const BasicBlock *BB) {
+  const BasicBlock *SingleSuccessor = nullptr;
+  for (const auto *Succ : children<const BasicBlock *>(BB)) {
+    if (isa<UnreachableInst>(Succ->getFirstNonPHIOrDbgOrLifetime()))
+      continue;
+    if (!SingleSuccessor)
+      SingleSuccessor = Succ;
+    else
+      return nullptr;
+  }
+  return SingleSuccessor;
+}
+
+static bool isUnusualExit(const BasicBlock *Exit, const Spindle *S) {
+  const Instruction *ExitTerm = Exit->getTerminator();
+  const BasicBlock *EHContin = nullptr;
+  if (DetachInst *DI = S->getParentTask()->getDetach())
+    EHContin = DI->getUnwindDest();
+  return !(isTaskFrameResume(ExitTerm) || isa<UnreachableInst>(ExitTerm) ||
+           isa<ResumeInst>(ExitTerm) || isa<ReattachInst>(ExitTerm) ||
+           isa<ReturnInst>(ExitTerm) ||
+           (EHContin && (getSingleNotUnreachableSuccessor(Exit) == EHContin)));
+}
+
 /// Return true if this spindle is a shared EH spindle.
 bool Spindle::isSharedEH() const {
   return getParentTask()->containsSharedEH(this);
@@ -447,6 +472,34 @@ static void associateWithSpindle(TaskInfo *TI, Spindle *S,
          "Not all unassociated blocks were associated with spindle.");
 }
 
+// Helper function to mark successor spindles connected to \p Exiting as
+// shared-EH spindles, starting at spindle \p FirstSharedEH.
+static void markSharedEHSpindles(TaskInfo *TI, Spindle *Exiting,
+                                 Spindle *FirstSharedEH) {
+  SmallVector<Spindle *, 8> WorkList;
+  SmallPtrSet<Spindle *, 8> Visited;
+
+  WorkList.push_back(FirstSharedEH);
+  while (!WorkList.empty()) {
+    Spindle *S = WorkList.pop_back_val();
+    if (!Visited.insert(S).second)
+      continue;
+
+    S->getParentTask()->markEHSpindle(*S);
+    for (BasicBlock *Exit : S->spindle_exits()) {
+      for (BasicBlock *SB : successors(Exit)) {
+        Spindle *Succ = TI->getSpindleFor(SB);
+        // Check if Succ is an unusual exit for S.  If so, then Succ may be
+        // a shared EH spindle with S's parent task.
+        if (!isa<DetachInst>(Exit->getTerminator()) &&
+            isUnusualExit(Exit, Exiting)) {
+          WorkList.push_back(Succ);
+        }
+      }
+    }
+  }
+}
+
 // Helper function to add spindle edges to spindles.
 static void computeSpindleEdges(TaskInfo *TI) {
   // Walk all spindles in the CFG to find all spindle edges.
@@ -466,6 +519,12 @@ static void computeSpindleEdges(TaskInfo *TI) {
         Spindle *Succ = TI->getSpindleFor(SB);
         if (Succ != S) {
           S->addSpindleEdgeTo(Succ, Exit);
+          if (Succ->getParentTask() != S->getParentTask())
+            // Check if Succ is an unusual exit for S.  If so, then Succ may be
+            // a shared EH spindle with S's parent task.
+            if (!isa<DetachInst>(Exit->getTerminator()) &&
+                isUnusualExit(Exit, S))
+              markSharedEHSpindles(TI, S, Succ);
           // Add this successor spindle for processing.
           WorkList.push_back(Succ);
         }
@@ -1393,20 +1452,6 @@ bool TaskInfo::invalidate(Function &F, const PreservedAnalyses &PA,
   auto PAC = PA.getChecker<TaskAnalysis>();
   return !(PAC.preserved() || PAC.preservedSet<AllAnalysesOn<Function>>() ||
            PAC.preservedSet<CFGAnalyses>());
-}
-
-static const BasicBlock *getSingleNotUnreachableSuccessor(
-    const BasicBlock *BB) {
-  const BasicBlock *SingleSuccessor = nullptr;
-  for (const auto *Succ : children<const BasicBlock *>(BB)) {
-    if (isa<UnreachableInst>(Succ->getFirstNonPHIOrDbgOrLifetime()))
-      continue;
-    if (!SingleSuccessor)
-      SingleSuccessor = Succ;
-    else
-      return nullptr;
-  }
-  return SingleSuccessor;
 }
 
 /// Print spindle with all the BBs inside it.
